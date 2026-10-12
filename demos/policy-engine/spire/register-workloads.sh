@@ -9,8 +9,8 @@
 #
 # The SPIFFE ID follows the usual deployment-shaped convention (namespace and
 # service account), so it names where the agent runs, not which agent it is.
-# Keycloak's hr-copilot-agent client is bound to it
-# (spire/configure-federated-client.sh).
+# Keycloak's hr-copilot-agent client is bound to it (registry/sync.py, from
+# registry/agents/hr-copilot-agent.json).
 #
 # Idempotent: an existing entry for the same SPIFFE ID is replaced.
 #

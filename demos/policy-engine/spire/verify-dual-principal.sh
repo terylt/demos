@@ -18,7 +18,7 @@
 #
 # Prereq: full stack + SPIRE + SPIFFE IdP/client configured:
 #   WITH_SPIRE=1 ./restart.sh
-#   ./spire/setup-spiffe-idp.sh && ./spire/configure-federated-client.sh
+#   ./spire/setup-spiffe-idp.sh && ./registry/sync.py
 set -euo pipefail
 
 KC="${KC:-http://localhost:8081}"

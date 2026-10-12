@@ -1,0 +1,16 @@
+{
+  "schema_version": "1",
+  "agent_id": "hr-copilot-agent",
+  "spiffe_id": "spiffe://policy.demo/ns/hr/sa/copilot",
+  "trust_domain": "spiffe://policy.demo",
+  "approved_runtime_issuer": "spiffe",
+  "lifecycle_state": "active",
+  "owner_ref": "teams/hr-platform",
+  "sponsor_ref": "users/alice",
+  "policy_profile_ref": "profiles/hr-agents",
+  "valid_until": "2027-06-30T00:00:00Z",
+  "approved_software_refs": [],
+  "provider_entitlements": {
+    "exchange_clients": ["praxis-gateway"]
+  }
+}
