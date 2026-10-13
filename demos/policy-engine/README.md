@@ -245,7 +245,7 @@ rather than one the caller sent.
 | 11 | Bob adjusts compensation by > $10k | Human-in-the-loop: the gateway suspends with `-32120`, Alice approves out-of-band (CIBA), then it applies |
 | 12 | Bob calls `get_compensation`, then again spoofing an asserted header | `assertions:` renders identity into upstream headers, strips his raw token, and refuses to forward a header he set himself |
 | 13 | The agent calls `get_headcount` with only its SPIFFE JWT-SVID | Workload identity: the agent gets its SVID by attestation, the route authenticates by the SVID alone, and two-leg delegation obtains a `workday-api` token. No person involved. An unregistered process gets no SVID. Needs `WITH_SPIRE=1`; skipped otherwise |
-| 14 | The registry's record for the agent shows up in its token, then the agent is suspended | The agent's token carries `agent_owner`, `agent_policy_profile` and the record version; once suspended, Keycloak refuses its SVID and the call is denied with `delegation.idp_rejected`. Needs `WITH_SPIRE=1`; skipped otherwise |
+| 14 | The registry's record shows up in the agent's token; the agent is then suspended, reinstated and revoked | The token carries `agent_owner`, `agent_policy_profile` and the record version, and lasts five minutes. Suspended, the agent is refused a new token and the one it holds is refused at the exchange (`delegation.idp_rejected`); reinstated, that token works again; revoked, it stays invalid while new tokens work. Needs `WITH_SPIRE=1`; skipped otherwise |
 | 15 | Two registered agents call `list_open_roles` with their own Keycloak tokens | Policy from the registry: `hr-copilot-agent` (HR profile) is allowed and the gateway exchanges its token for `workday-api`; `finance-bot` (finance profile) and an unregistered user token are denied with `agent_profile_not_permitted`; the raw SVID is refused. Needs `WITH_SPIRE=1`; skipped otherwise |
 
 Scenarios 10 and 11 exercise the human-in-the-loop flow described in
@@ -597,14 +597,24 @@ Each agent's registration lives in a record under `registry/agents/`, one JSON f
 
 The version is the number of commits that touched the record, with `+dirty` while it has uncommitted edits; the digest is SHA-256 over the record's canonical JSON. A token therefore says which version of the record it was issued against.
 
-A client is enabled only while its record is `active` and before `valid_until`. Keycloak refuses to issue tokens to a disabled client, so suspending an agent in the registry stops it at the next token request. Clients the sync created for agents no longer in the registry are deleted.
+The sync updates clients in place, so an agent keeps its client and service account across syncs. The record's `lifecycle_state` decides what Keycloak does:
+
+| State | Client | Tokens the agent already holds |
+|---|---|---|
+| `active` (and before `valid_until`) | enabled | valid |
+| `suspended`, or past `valid_until` | disabled: no new tokens | inactive while suspended; valid again once the agent is reinstated |
+| `revoked` | disabled, and its "not before" time set to now | invalid for good, even after the agent is reinstated |
+
+Agent tokens last five minutes (`TOKEN_LIFESPAN`, 300 seconds by default), against the realm's four hours. The agent can always get a new one with its SVID, so the short lifetime costs nothing, and it matters because of the gap below. Clients the sync created for agents no longer in the registry are deleted.
 
 ```bash
 ./registry/sync.py                                    # make Keycloak match the records
 ./registry/sync.py --state hr-copilot-agent=suspended # one-run override, record unchanged
 ```
 
-Scenario 14 shows both: the record's facts in the agent's token, and a suspended agent refused with `delegation.idp_rejected` before the call reaches the tool.
+**The gateway does not check revocation itself yet.** A suspended or revoked agent's token still passes the gateway's verification and policy; what stops the call is Keycloak refusing to exchange it for the downstream token. A route that does not exchange the agent's token would let it through until the token expires, which the five-minute lifetime bounds. A revocation check at the gateway is tracked in praxis-proxy/policy#205.
+
+Scenario 14 shows all of it: the record's facts in the agent's token, a suspended agent refused, a token it already held refused at the exchange and valid again once the suspension is lifted, and a revocation that outlasts reinstatement.
 
 ### Policy from the registry
 

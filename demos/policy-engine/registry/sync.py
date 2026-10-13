@@ -18,9 +18,17 @@ puts the facts a policy needs into every token issued to the agent.
                                                 record (scenario 14 uses this)
 
 A client is enabled only while its record is `active` and not past
-`valid_until`; Keycloak refuses to issue tokens to a disabled client, which is
-what stops a suspended agent. Clients this script created earlier for agents
-no longer in the registry are deleted.
+`valid_until`. Disabling it is a suspension: Keycloak issues the agent no new
+tokens, treats the ones it holds as inactive, and refuses to exchange them, and
+re-enabling it makes those same tokens valid again. A `revoked` record also
+sets the client's "not before" time, which invalidates every token issued
+before it for good, even if the agent is later reinstated. Agent tokens last
+TOKEN_LIFESPAN seconds, which bounds how long a gateway that does not go back
+to Keycloak keeps accepting a suspended agent's token. Clients this script
+created earlier for agents no longer in the registry are deleted.
+
+Clients are updated in place, so an agent keeps its client and service account
+across syncs and a suspension can be lifted.
 
 The record version is the number of commits that touched the record's file,
 with "+dirty" when the file has uncommitted changes, and the digest is SHA-256
@@ -40,6 +48,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -51,6 +60,9 @@ REALM = os.environ.get("REALM", "policy-demo")
 ADMIN = os.environ.get("ADMIN", "admin")
 ADMIN_PW = os.environ.get("ADMIN_PW", "admin")
 MANAGED = "registry.managed"
+# Agent access token lifetime. The agent can always get a new token with its
+# SVID, so this costs nothing and caps how long a token outlives a suspension.
+TOKEN_LIFESPAN = int(os.environ.get("TOKEN_LIFESPAN", "300"))
 
 # Record fields copied onto the client as `registry.<field>` attributes.
 ATTRIBUTES = [
@@ -141,6 +153,7 @@ def client_for(record, state, version, digest):
         # from this identity provider, and picks this client by the SVID's sub.
         "jwt.credential.issuer": record["approved_runtime_issuer"],
         "jwt.credential.sub": record["spiffe_id"],
+        "access.token.lifespan": str(TOKEN_LIFESPAN),
     })
     mappers = [hardcoded(claim, record[field]) for claim, field in CLAIMS.items()]
     mappers.append(hardcoded("agent_registration_ref", f"{KC}/realms/{REALM}#{agent}@{version};{digest}"))
@@ -180,11 +193,29 @@ def main():
         state = overrides.get(agent, record["lifecycle_state"])
         version, digest = version_of(path), digest_of(record)
         client = client_for(record, state, version, digest)
-        # Recreate rather than update: Keycloak's client PUT does not reliably
-        # replace protocol mappers, and recreating keeps this idempotent.
-        for existing in call("GET", f"{base}?clientId={urllib.parse.quote(agent)}", token):
-            call("DELETE", f"{base}/{existing['id']}", token)
-        call("POST", base, token, body=client)
+        existing = call("GET", f"{base}?clientId={urllib.parse.quote(agent)}", token)
+        if existing:
+            cid = existing[0]["id"]
+            # Update in place, keeping the client and its service account, so a
+            # suspension can be lifted and the agent's tokens become valid again.
+            update = {**existing[0], **{k: v for k, v in client.items() if k != "protocolMappers"}}
+            update["attributes"] = {**existing[0].get("attributes", {}), **client["attributes"]}
+        else:
+            call("POST", base, token, body=client)
+            cid = call("GET", f"{base}?clientId={urllib.parse.quote(agent)}", token)[0]["id"]
+            update = call("GET", f"{base}/{cid}", token)
+        if state == "revoked":
+            # Tokens issued before this instant are invalid from now on. Set on
+            # every revoke, so a second revocation covers tokens issued since
+            # the first; the disabled client issues none in the meantime.
+            update["notBefore"] = int(time.time())
+        call("PUT", f"{base}/{cid}", token, body=update)
+        # The client PUT does not reliably replace protocol mappers, so they
+        # are replaced one by one.
+        for mapper in call("GET", f"{base}/{cid}/protocol-mappers/models", token):
+            call("DELETE", f"{base}/{cid}/protocol-mappers/models/{mapper['id']}", token)
+        for mapper in client["protocolMappers"]:
+            call("POST", f"{base}/{cid}/protocol-mappers/models", token, body=mapper)
         print(f"sync: {agent} v{version} {state} "
               f"({'enabled' if client['enabled'] else 'disabled'}) {digest[:19]}")
 
