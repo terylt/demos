@@ -104,6 +104,36 @@ plugins:
           leeway_seconds: 60
       claim_mapper: standard
 
+  # Agent identity by registration: the agent's own Keycloak token, which it
+  # gets by presenting its SVID to Keycloak as a client assertion
+  # (registry/sync.py created its client). The token carries the agent's
+  # registration as agent_* claims. `role: user` makes the agent the subject of
+  # its own call, so policy reads those claims as claim.agent_*, and a plain
+  # delegate(...) exchanges this token on the gateway's own client credential.
+  # Only the list_open_roles route names it.
+  - name: jwt-agent
+    capabilities:
+      - perform_http
+    kind: identity/jwt
+    hooks: [identity.resolve]
+    mode: sequential
+    on_error: fail
+    config:
+      role: user
+      header: Authorization
+      trusted_issuers:
+        - issuer: "http://localhost:8081/realms/policy-demo"
+          # registry/sync.py adds praxis-gateway to the agent's audience so
+          # the gateway may exchange the token.
+          audiences: ["praxis-gateway"]
+          algorithms: ["RS256"]
+          decoding_key:
+            kind: jwks_url
+            url: "http://localhost:8081/realms/policy-demo/protocol/openid-connect/certs"
+            insecure_http: true   # localhost dev — never production
+          leeway_seconds: 60
+      claim_mapper: standard
+
   # RFC 8693 token-exchange delegator. Trades the user's hr-copilot
   # token for a workday-api-audience-scoped access token.
   #
@@ -434,5 +464,26 @@ routes:
     authorization:
       pre_invocation:
         - "delegate(workday-oauth, target: workday-api, audience: workday-api, permissions: [read_compensation], subject: caller_workload)"
+        - "!delegation.granted: deny"
+        - "run(audit-log)"
+
+  # Registered agents: the agent presents its own Keycloak token, which carries
+  # its registration record (see registry/). Policy decides from the
+  # registration: only an agent whose record names the HR agent profile may
+  # list open roles. The rule tests for the allowed value, so a token without
+  # the claim is denied too. The gateway then exchanges the agent's token for a
+  # workday-api token on its own client credential; the agent never holds one.
+  # The global assertions apply unchanged: the agent is the subject, so the
+  # upstream receives the agent's identity in x-auth-user-id.
+  # Needs the SPIRE overlay: see "The agent registry" in the README.
+  - tool: list_open_roles
+    authentication:
+      replace_inherited: true
+      steps:
+        - jwt-agent
+    authorization:
+      pre_invocation:
+        - "!(claim.agent_policy_profile == 'profiles/hr-agents'): deny('agent is not registered for HR tools', 'agent_profile_not_permitted')"
+        - "delegate(workday-oauth, target: workday-api, audience: workday-api, permissions: [read_compensation])"
         - "!delegation.granted: deny"
         - "run(audit-log)"

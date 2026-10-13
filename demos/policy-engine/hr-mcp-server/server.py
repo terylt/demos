@@ -24,7 +24,7 @@ than printing a claim next to a log line and trusting a human to read it.
 
 Tools:
     get_compensation, send_email, display_compensation, get_directory,
-    search_repos, adjust_compensation, get_headcount
+    search_repos, adjust_compensation, get_headcount, list_open_roles
 """
 
 import base64
@@ -265,6 +265,21 @@ def tool_get_headcount(args: dict[str, Any]) -> dict[str, Any]:
     return {"headcount": counts, "total": sum(counts.values())}
 
 
+OPEN_ROLES = [
+    {"req_id": "R-104", "title": "Staff Data Engineer", "department": "Engineering", "location": "Remote"},
+    {"req_id": "R-117", "title": "HR Business Partner", "department": "HR", "location": "Toronto"},
+    {"req_id": "R-121", "title": "Product Marketing Manager", "department": "Marketing", "location": "New York"},
+]
+
+
+def tool_list_open_roles(args: dict[str, Any]) -> dict[str, Any]:
+    # Open requisitions, filterable by department. The registered-agent
+    # scenario uses it: only agents registered with the HR profile may call it.
+    department = args.get("department", "")
+    roles = [r for r in OPEN_ROLES if not department or r["department"].lower() == department.lower()]
+    return {"open_roles": roles, "count": len(roles)}
+
+
 def tool_search_repos(args: dict[str, Any]) -> dict[str, Any]:
     # Simulated GitHub Enterprise search. The interesting demo
     # property: this returns the repo IF the gateway allowed the
@@ -309,6 +324,7 @@ TOOLS = {
     "display_compensation": tool_display_compensation,
     "get_directory": tool_get_directory,
     "get_headcount": tool_get_headcount,
+    "list_open_roles": tool_list_open_roles,
     "search_repos": tool_search_repos,
     "adjust_compensation": tool_adjust_compensation,
 }
