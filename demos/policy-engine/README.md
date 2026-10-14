@@ -218,7 +218,7 @@ heals that one itself by regenerating.
 
 ## Scenarios
 
-Fifteen scenarios cover every feature in the filter. Run any one directly, for
+Sixteen scenarios cover every feature in the filter. Run any one directly, for
 example `./scenarios/01-bob-allow.sh`, or all of them with `./run-scenarios.sh`.
 
 Each scenario checks its own expectations and exits non-zero when one is not
@@ -247,11 +247,12 @@ rather than one the caller sent.
 | 13 | The agent calls `get_headcount` with only its SPIFFE JWT-SVID | Workload identity: the agent gets its SVID by attestation, the route authenticates by the SVID alone, and two-leg delegation obtains a `workday-api` token. No person involved. An unregistered process gets no SVID. Needs `WITH_SPIRE=1`; skipped otherwise |
 | 14 | The registry's record shows up in the agent's token; the agent is then suspended, reinstated and revoked | The token carries `agent_owner`, `agent_policy_profile` and the record version, and lasts five minutes. Suspended, the agent is refused a new token and the one it holds is refused at the exchange (`delegation.idp_rejected`); reinstated, that token works again; revoked, it stays invalid while new tokens work. Needs `WITH_SPIRE=1`; skipped otherwise |
 | 15 | Two registered agents call `list_open_roles` with their own Keycloak tokens | Policy from the registry: `hr-copilot-agent` (HR profile) is allowed and the gateway exchanges its token for `workday-api`; `finance-bot` (finance profile) and an unregistered user token are denied with `agent_profile_not_permitted`; the raw SVID is refused. Needs `WITH_SPIRE=1`; skipped otherwise |
+| 16 | hr-copilot's staging runtime calls `list_open_roles` | One agent, two runtimes: the staging process (uid 1003) gets a different SPIFFE ID and client, but its token names the same `agent_id` and profile, so policy allows it. Needs `WITH_SPIRE=1`; skipped otherwise |
 
 Scenarios 10 and 11 exercise the human-in-the-loop flow described in
 [Human-in-the-loop: manager approval](#human-in-the-loop-manager-approval)
 below. Scenario 11 needs the full stack (Keycloak CIBA plus the auth-channel UI);
-`restart.sh` brings it all up. Scenarios 13 to 15 need the SPIRE layer described in
+`restart.sh` brings it all up. Scenarios 13 to 16 need the SPIRE layer described in
 [Workload identity: the agent acts as itself](#workload-identity-the-agent-acts-as-itself).
 
 ## Alternatives: CEL or OPA instead of Cedar
@@ -555,7 +556,7 @@ Two things make the `get_headcount` route different from the others.
 
 ```text
 leg 1  SVID  --client_assertion (…:jwt-spiffe)-->  Keycloak   base token
-             grant_type=client_credentials                    (azp=hr-copilot-agent)
+             grant_type=client_credentials                    (azp=hr-copilot-agent.prod)
 leg 2  base  --RFC 8693 token exchange----------->  Keycloak   workday-api token
              subject_token=<base>, audience=workday-api        (aud=workday-api)
 ```
@@ -568,9 +569,8 @@ The SVID is a JWT, but not one Keycloak issued: SPIRE signs it (ES256) and it ve
 
 - **`docker-compose.spire.yml`** adds `spire-server`, the SVID authority for trust domain `spiffe://policy.demo`, and `spire-oidc`, SPIRE's OIDC discovery provider, which publishes the signing keys at `/keys` (port 8443). It also turns on Keycloak's `spiffe` feature, which is still a preview feature in Keycloak 26.8 because the SPIFFE client authentication specification is still a draft.
 - **`spire-agent` and `workloads`** are where SVIDs come from. `restart.sh` exports the server's CA bundle and generates a one-time join token, and the agent uses them to join the server (node attestation). The `workloads` container is where the agent processes run, one user per agent. It shares the SPIRE agent's process namespace and Workload API socket, so when a process asks for an SVID, the agent reads its uid from the kernel and issues the SVID registered for that uid (workload attestation, with SPIRE's `unix` attestor). A process the registry does not name gets nothing.
-- **`spire/register-workloads.sh`** creates the registration entry: a process running as uid 1001 in `workloads` is `spiffe://policy.demo/ns/hr/sa/copilot`. The ID follows the usual namespace and service account shape, naming where the agent runs.
 - **`spire/setup-spiffe-idp.sh`** registers SPIRE as a native `spiffe` identity provider in the `policy-demo` realm. The provider type is `spiffe`, not `oidc`: the generic OIDC broker would check tokens through a UserInfo endpoint SPIRE does not serve, while the native provider verifies the SVID's signature against SPIRE's keys.
-- **`registry/sync.py`** creates each registered agent's Keycloak client from its record in `registry/agents/`. The `hr-copilot-agent` client authenticates with `federated-jwt` bound to the SVID's subject (`spiffe://policy.demo/ns/hr/sa/copilot`). It is separate from `hr-copilot`, the secret-based app client, because a Keycloak client has exactly one way to authenticate. The record also puts `praxis-gateway` in the token's audience; without that, leg 2 fails with "Client is not within the token audience". See [The agent registry](#the-agent-registry).
+- **`registry/sync.py`** creates the registration entries and Keycloak clients for every agent runtime in `registry/agents/`. Production hr-copilot is uid 1001 in `workloads`, with SPIFFE ID `spiffe://policy.demo/ns/hr/sa/copilot`; the ID follows the usual namespace and service account shape, naming where the agent runs. Its Keycloak client, `hr-copilot-agent.prod`, authenticates with `federated-jwt` bound to that SPIFFE ID. It is separate from `hr-copilot`, the secret-based app client, because a Keycloak client has exactly one way to authenticate. The record also puts `praxis-gateway` in the token's audience; without that, leg 2 fails with "Client is not within the token audience". See [The agent registry](#the-agent-registry).
 
 The scripts are idempotent and take environment variables to override the Keycloak URL, realm, admin credentials, SPIFFE ID and selector; see the top of each.
 
@@ -584,12 +584,18 @@ What this attests is narrow: the process runs as uid 1001, on a node that joined
 
 ### The agent registry
 
-Each agent's registration lives in a record under `registry/agents/`, one JSON file per agent, shaped after the ODIS Agent Registration Record. The attribute and claim names below are this demo's own; ODIS does not define them. A record holds the agent's SPIFFE ID, lifecycle state, owner, sponsor, policy profile, trust domain, validity, approved software, and which clients may exchange its tokens. The records are in Git, so registering or changing an agent is a reviewed commit, and the sponsor's approval can be a required review on the file.
+Each agent's registration lives in a record under `registry/agents/`, one JSON file per agent, shaped after the ODIS Agent Registration Record. The attribute and claim names below are this demo's own; ODIS does not define them. A record holds the agent's runtimes, lifecycle state, owner, sponsor, policy profile, trust domain, validity, approved software, and which clients may exchange its tokens. The records are in Git, so registering or changing an agent is a reviewed commit, and the sponsor's approval can be a required review on the file.
 
-`registry/sync.py` makes Keycloak match the records. For each agent it creates the client, copies the record onto it as `registry.*` attributes, and adds mappers so every token issued to the agent carries the facts a policy needs:
+An agent is one logical identity that may run in several places, so its record lists `runtimes`, each a SPIFFE ID and the SPIRE selectors of the processes that may hold it. hr-copilot has two: production (uid 1001, `spiffe://policy.demo/ns/hr/sa/copilot`) and staging (uid 1003, `spiffe://policy.demo/ns/hr-staging/sa/copilot`). The SPIFFE ID says where the agent runs; `agent_id` says which agent it is, and that is what policy and audit should name.
+
+`registry/sync.py` makes SPIRE and Keycloak match the records. For each runtime it creates:
+
+- a SPIRE registration entry, tagged `registry:<agent_id>`, so SPIRE issues that SPIFFE ID to a process it attests with those selectors and to no other; and
+- a Keycloak client `<agent_id>.<runtime>`, bound to that SPIFFE ID, with the record copied onto it as `registry.*` attributes and mappers so every token carries the facts a policy needs:
 
 | Claim | From the record |
 |---|---|
+| `agent_id` | `agent_id`, the same for every runtime |
 | `agent_owner` | `owner_ref` |
 | `agent_policy_profile` | `policy_profile_ref` |
 | `agent_trust_domain` | `trust_domain` |
@@ -597,7 +603,7 @@ Each agent's registration lives in a record under `registry/agents/`, one JSON f
 
 The version is the number of commits that touched the record, with `+dirty` while it has uncommitted edits; the digest is SHA-256 over the record's canonical JSON. A token therefore says which version of the record it was issued against.
 
-The sync updates clients in place, so an agent keeps its client and service account across syncs. The record's `lifecycle_state` decides what Keycloak does:
+The sync updates clients in place, so an agent keeps its clients and service accounts across syncs. SPIRE keeps issuing SVIDs to every registered runtime whatever the agent's state, because an SVID says which workload this is, not what it may do; the lifecycle applies to all of an agent's clients at once. The record's `lifecycle_state` decides what Keycloak does:
 
 | State | Client | Tokens the agent already holds |
 |---|---|---|
@@ -685,10 +691,10 @@ the padding, so the wire stays correct. This is documented in the filter source.
 | `keycloak/realm-export.json` | Realm with users, clients, STE v2, and CIBA + the channel SPI |
 | `hr-mcp-server/` | Python mock MCP server (Dockerfile and `server.py`), incl. `adjust_compensation` and the `/_requests` recorder the scenarios assert against |
 | `auth-channel/` | CIBA approval UI (`:5001`, "the manager's phone") for Approve / Deny; dev `/pending` + `/approve` API for scripted approval |
-| `scenarios/*.sh` | The fifteen scenarios (08/09 session taint, 10/11 manager approval, 12 assertions, 13 workload identity, 14 agent registry, 15 policy from the registry) and `_lib.sh` helpers plus its `expect_*` assertions |
+| `scenarios/*.sh` | The sixteen scenarios (08/09 session taint, 10/11 manager approval, 12 assertions, 13 workload identity, 14 agent registry, 15 policy from the registry, 16 agent runtimes) and `_lib.sh` helpers plus its `expect_*` assertions |
 | `docker-compose.spire.yml` | Optional SPIRE layer for scenario 13: `spire-server`, `spire-oidc` (8443), and Keycloak's `spiffe` feature. Added by `WITH_SPIRE=1` |
 | `spire/` | SPIRE server, agent and discovery-provider config, the `workloads` image, the workload registration and SVID fetch scripts, the Keycloak setup script for the SPIFFE identity provider, and two checks that exercise Keycloak directly |
-| `registry/` | The agent registry: one JSON record per agent in `agents/`, and `sync.py`, which creates the agents' Keycloak clients from them |
+| `registry/` | The agent registry: one JSON record per agent in `agents/`, and `sync.py`, which creates the SPIRE entries and Keycloak clients for each agent runtime |
 | `run-scenarios.sh` | Run every scenario, optionally across all three PDP configs, and report pass/fail |
 | `mint-token.sh` | Mint a user or client token via Keycloak |
 | `verify-token-exchange.sh` | Check that STE v2 is configured correctly |

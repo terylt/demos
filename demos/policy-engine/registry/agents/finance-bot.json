@@ -1,7 +1,15 @@
 {
   "schema_version": "1",
   "agent_id": "finance-bot",
-  "spiffe_id": "spiffe://policy.demo/agent/finance-bot",
+  "runtimes": [
+    {
+      "name": "prod",
+      "spiffe_id": "spiffe://policy.demo/ns/finance/sa/bot",
+      "selectors": [
+        "unix:uid:1002"
+      ]
+    }
+  ],
   "trust_domain": "spiffe://policy.demo",
   "approved_runtime_issuer": "spiffe",
   "lifecycle_state": "active",

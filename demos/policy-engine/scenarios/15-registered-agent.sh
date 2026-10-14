@@ -4,7 +4,8 @@
 #
 # Registered agents: the gateway decides from the agent's registration.
 #
-# Each agent presents its SPIFFE JWT-SVID to Keycloak, which issues it a token
+# Each agent fetches its SPIFFE JWT-SVID by attestation (hr-copilot runs as uid
+# 1001, finance-bot as uid 1002) and presents it to Keycloak, which issues a token
 # carrying its registration record as agent_* claims (registry/sync.py set
 # that up). The agent then calls the gateway with that token, not the SVID.
 # The list_open_roles route:
@@ -37,11 +38,9 @@ if ! curl -sf --max-time 3 -o /dev/null http://localhost:8443/keys; then
   exit 77
 fi
 
-agent_token() { # $1 = SPIFFE ID; prints the agent's Keycloak access token
+agent_token() { # $1 = the agent's uid in `workloads`; prints its Keycloak access token
   local svid
-  svid=$( (cd "$DEMO_DIR" && docker compose -f docker-compose.yml -f docker-compose.spire.yml \
-            exec -T spire-server /opt/spire/bin/spire-server jwt mint \
-            -spiffeID "$1" -audience "$REALM_ISSUER") 2>/dev/null | tr -d '[:space:]')
+  svid=$("$DEMO_DIR/spire/fetch-svid.sh" "$1" "$REALM_ISSUER" 2>/dev/null) || return 0
   curl -sf -X POST "$TOKEN_URL" \
     -d grant_type=client_credentials \
     -d client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-spiffe \
@@ -57,7 +56,7 @@ call_list_open_roles() { # $1 = agent token
 }
 
 step "1. hr-copilot-agent (profile hr-agents) → list_open_roles with its Keycloak token"
-HR_TOKEN="$(agent_token spiffe://policy.demo/agent/hr-copilot)"
+HR_TOKEN="$(agent_token 1001)"
 if [ -z "$HR_TOKEN" ]; then
   fail_ "Keycloak issued no token for hr-copilot-agent's SVID"
   finish
@@ -74,7 +73,7 @@ expect_upstream_audience workday-api
 expect_upstream_header x-auth-user-id "$(token_sub "$HR_TOKEN")"
 
 step "2. finance-bot (profile finance-agents) → list_open_roles is denied by policy"
-FIN_TOKEN="$(agent_token spiffe://policy.demo/agent/finance-bot)"
+FIN_TOKEN="$(agent_token 1002)"
 if [ -z "$FIN_TOKEN" ]; then
   fail_ "Keycloak issued no token for finance-bot's SVID"
   finish
@@ -91,9 +90,7 @@ expect_violation agent_profile_not_permitted
 expect_upstream_calls 0
 
 step "4. The agent's raw SVID → list_open_roles is refused at authentication"
-SVID=$( (cd "$DEMO_DIR" && docker compose -f docker-compose.yml -f docker-compose.spire.yml \
-          exec -T spire-server /opt/spire/bin/spire-server jwt mint \
-          -spiffeID spiffe://policy.demo/agent/hr-copilot -audience "$REALM_ISSUER") 2>/dev/null | tr -d '[:space:]')
+SVID=$("$DEMO_DIR/spire/fetch-svid.sh" 1001 "$REALM_ISSUER" 2>/dev/null) || true
 reset_upstream
 call_list_open_roles "$SVID"
 expect_status 401

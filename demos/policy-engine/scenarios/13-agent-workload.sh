@@ -14,7 +14,7 @@
 #      is needed,
 #   2. runs `delegate(..., subject: caller_workload)`: leg 1 presents the SVID
 #      as an RFC 7523 client assertion (type ...:jwt-spiffe) to authenticate as
-#      the hr-copilot-agent client, and leg 2 exchanges that token for a
+#      the agent runtime's client (hr-copilot-agent.prod), and leg 2 exchanges that token for a
 #      workday-api-scoped credential,
 #   3. attaches the minted workday-api token to the upstream call, and strips
 #      a stray X-User-Token and a spoofed X-Auth-User-Id the call also carries.

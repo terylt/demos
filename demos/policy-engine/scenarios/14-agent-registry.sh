@@ -84,7 +84,9 @@ if [ -z "$TOKEN" ]; then
   fail_ "Keycloak issued no token for the agent's SVID"
   finish
 fi
-expect_claim "$TOKEN" azp "$AGENT"
+# The token names the agent; azp names the runtime's client.
+expect_claim "$TOKEN" agent_id "$AGENT"
+expect_claim "$TOKEN" azp "$AGENT.prod"
 expect_claim "$TOKEN" agent_owner "$(jq -r .owner_ref "$RECORD")"
 expect_claim "$TOKEN" agent_policy_profile "$(jq -r .policy_profile_ref "$RECORD")"
 REF="$(claim "$TOKEN" agent_registration_ref)"

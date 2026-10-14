@@ -11,6 +11,10 @@ FROM ghcr.io/spiffe/spire-agent:1.9.6 AS spire
 FROM alpine:3.20
 COPY --from=spire /opt/spire/bin/spire-agent /usr/local/bin/spire-agent
 # 1001: hr-copilot (registered). 1004: a process nobody registered.
+# 1002 and 1003 are only registered by the agent registry (registry/): the
+# finance bot, and a second runtime of hr-copilot ("staging").
 RUN adduser -D -u 1001 hr-copilot \
+ && adduser -D -u 1002 finance-bot \
+ && adduser -D -u 1003 hr-copilot-staging \
  && adduser -D -u 1004 unregistered
 CMD ["sleep", "infinity"]

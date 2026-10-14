@@ -15,7 +15,7 @@
 # one-time join token (node attestation), and when a process asks for an SVID
 # the agent identifies it by its uid, read from the kernel (workload
 # attestation with the `unix` attestor). Registration entries map uids to
-# SPIFFE IDs (spire/register-workloads.sh).
+# SPIFFE IDs; the agent registry creates them (registry/sync.py).
 #
 #   # Bring up the demo with SPIRE. This recreates Keycloak with the spiffe
 #   # feature below and registers SPIRE in the realm:

@@ -1,7 +1,22 @@
 {
   "schema_version": "1",
   "agent_id": "hr-copilot-agent",
-  "spiffe_id": "spiffe://policy.demo/ns/hr/sa/copilot",
+  "runtimes": [
+    {
+      "name": "prod",
+      "spiffe_id": "spiffe://policy.demo/ns/hr/sa/copilot",
+      "selectors": [
+        "unix:uid:1001"
+      ]
+    },
+    {
+      "name": "staging",
+      "spiffe_id": "spiffe://policy.demo/ns/hr-staging/sa/copilot",
+      "selectors": [
+        "unix:uid:1003"
+      ]
+    }
+  ],
   "trust_domain": "spiffe://policy.demo",
   "approved_runtime_issuer": "spiffe",
   "lifecycle_state": "active",
@@ -11,6 +26,8 @@
   "valid_until": "2027-06-30T00:00:00Z",
   "approved_software_refs": [],
   "provider_entitlements": {
-    "exchange_clients": ["praxis-gateway"]
+    "exchange_clients": [
+      "praxis-gateway"
+    ]
   }
 }

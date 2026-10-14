@@ -10,12 +10,13 @@
 #      draft-ietf-oauth-spiffe-client-auth).
 #   2. The SVID is presented as an RFC 7523 client_assertion
 #      (type ...:jwt-spiffe) — Keycloak validates it against the SPIFFE
-#      trust bundle and issues hr-copilot-agent's token. No client secret.
+#      trust bundle and issues a token for the runtime's client
+#      (hr-copilot-agent.prod). No client secret.
 #   3. A standard (v2) token exchange scopes that token down to the
 #      workday-api audience with read_compensation. Both tokens are
 #      Keycloak-issued (internal->internal), so this is ordinary v2 exchange.
 #
-# The minted workday-api token keeps sub=service-account-hr-copilot-agent, so the
+# The minted workday-api token keeps sub=service-account-hr-copilot-agent.prod, so the
 # workload identity flows through to the downstream call.
 #
 # Prereq: stack up + IdP/client configured:

@@ -187,8 +187,8 @@ else
 fi
 
 # 5b. (WITH_SPIRE=1) wait for SPIRE's published keys, join the SPIRE agent to
-# the server, register the workloads, then register SPIRE as a SPIFFE identity
-# provider and sync the agent registry into Keycloak.
+# the server, register SPIRE as a SPIFFE identity provider, then sync the agent
+# registry into SPIRE (registration entries) and Keycloak (clients).
 if [ "$WITH_SPIRE" = "1" ]; then
   step "configuring the SPIRE overlay (agent, workloads, SPIFFE IdP, federated client)"
   deadline=$(( $(date +%s) + 60 ))
@@ -211,11 +211,11 @@ if [ "$WITH_SPIRE" = "1" ]; then
   SPIRE_JOIN_TOKEN="$SPIRE_JOIN_TOKEN" "${COMPOSE[@]}" --profile attestation \
     up -d spire-agent workloads >/dev/null 2>&1 \
     || die "SPIRE agent did not start — check '${COMPOSE[*]} --profile attestation logs spire-agent'"
-  ./spire/register-workloads.sh >/dev/null
   ./spire/setup-spiffe-idp.sh >/dev/null
-  # The agents' Keycloak clients come from the registry (registry/agents/).
+  # The agents' SPIRE entries and Keycloak clients come from the registry
+  # (registry/agents/).
   ./registry/sync.py >/dev/null
-  ok "SPIRE agent joined, workloads registered, SPIFFE IdP configured, agent registry synced"
+  ok "SPIRE agent joined, SPIFFE IdP configured, agent registry synced into SPIRE and Keycloak"
 fi
 
 # 6. Start the gateway, tee its output to ./gateway.log, wait for :8090.
